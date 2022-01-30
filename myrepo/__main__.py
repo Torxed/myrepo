@@ -10,5 +10,5 @@ if pathlib.Path('./myrepo/__init__.py').absolute().exists():
 else:
 	import myrepo
 
-# if myrepo.storage['arguments'].main:
-# 	myrepo.main()
+if myrepo.storage['arguments'].path:
+	print(myrepo.storage['arguments'].path)

@@ -1,3 +1,4 @@
+import pathlib
 from argparse import ArgumentParser
 from .environment.storage import storage
 from .system.workers import SysCommand, SysCommandWorker
@@ -14,7 +15,7 @@ __description__ = "A tool to create your own Arch Linux repository"
 # gain access to the arguments without parsing on their own.
 parser = ArgumentParser()
 
-parser.add_argument("--path", default="/srv/repo", nargs="?", help="Where to setup the repository structure", type=str)
+parser.add_argument("--path", default="/srv/repo", nargs="?", help="Where to setup the repository structure", type=pathlib.Path)
 parser.add_argument("--core", default=True, action="store_true", help="Enables sync of the core repository")
 parser.add_argument("--extra", default=True, action="store_true", help="Enables sync of the extra repository")
 parser.add_argument("--community", default=True, action="store_true", help="Enables sync of the community repository")
