@@ -247,10 +247,13 @@ def sync_packages(packages :List[str], path :pathlib.Path, skip :List[str] = [])
 				raise PackageError(f"Package {package} requires version equal to {target_version} but {version} was found")
 
 		repo = package_info.repo
+		database_path = path/repo/"os"/storage['arguments'].architecture
+		if (database_path/package_info.filename).exists:
+			log(f"Package already in cache, skipping", level=logging.INFO)
+
 		if getattr(storage['arguments'], repo) is False:
 			raise PackageError(f"Repository --{repo} is not activated, package is blocked")
 
-		database_path = path/repo/"os"/storage['arguments'].architecture
 		log(f"Found package '{package}', version {version} in repo {repo}", level=logging.DEBUG)
 
 		if not repo in repositories_to_update:
@@ -283,11 +286,13 @@ def sync_packages(packages :List[str], path :pathlib.Path, skip :List[str] = [])
 def update_repo_db(repo :str, path :pathlib.Path) -> bool:
 	log(f"Updating repo {repo} with any new packages", level=logging.INFO)
 	database_path = path/repo/"os"/storage['arguments'].architecture
-	options = ['--new', '--remove', '--prevent-downgrade']
+	options = ['--new', '--remove', '--prevent-downgrade', '--sign']
 
 	for package_type in ['.pkg.tar.xz', '.pkg.tar.zst']:
 		for package in glob.glob(f"{database_path}/*{package_type}"):
-			if not (repo_add := SysCommand(f"repo-add {' '.join(options)} {database_path}/{repo}.db.tar.gz {package}")).exit_code in (0, 256):
-				raise RepositoryError(f"Could not initiate repository {database_path}: [{repo_add.exit_code}] {repo_add}")
+			try:
+				SysCommand(f"repo-add {' '.join(options)} {database_path}/{repo}.db.tar.gz {package}")
+			except SysCallError as error:
+				raise RepositoryError(f"Could not initiate repository {database_path}: [{error.exit_code}] {error}")
 
 	return True
