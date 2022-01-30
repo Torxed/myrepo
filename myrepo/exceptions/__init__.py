@@ -8,3 +8,9 @@ class SysCallError(BaseException):
 		super(SysCallError, self).__init__(message)
 		self.message = message
 		self.exit_code = exit_code
+
+class PackageError(BaseException):
+	pass
+
+class RepositoryError(BaseException):
+	pass

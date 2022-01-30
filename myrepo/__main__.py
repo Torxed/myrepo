@@ -11,4 +11,9 @@ else:
 	import myrepo
 
 if myrepo.storage['arguments'].path:
-	print(myrepo.storage['arguments'].path)
+	myrepo.setup_destination(path=myrepo.storage['arguments'].path)
+	
+	myrepo.sync_packages(
+		packages=myrepo.storage['arguments'].packages,
+		path=myrepo.storage['arguments'].path
+	)
