@@ -1,0 +1,47 @@
+[build-system]
+requires = ["flit_core >=2,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "python-myrepo"
+module = "myrepo"
+authors = [{name = "Anton Hvornum", email = "anton.feeds+github@gmail.com"}]
+readme = "README.md"
+classifiers = ["License :: OSI Approved :: MIT License"]
+dynamic = ["version", "description"]
+dependencies = [
+	"systemd"
+]
+
+[project.urls]
+Home = "https://github.com/Torxed/myrepo"
+Documentation = "https://myrepo.readthedocs.io/"
+Source = "https://github.com/Torxed/myrepo"
+
+[project.optional-dependencies]
+test = [
+	"pytest",
+	"mypy",
+	"flake8",
+]
+
+[project.scripts]
+myrepo = "myrepo:main"
+
+[tool.flit.sdist]
+exclude = ["tests/", "test.py"]
+
+[tool.flit.module]
+name = "myrepo"
+
+[tool.mypy]
+python_version = "3.10"
+exclude = "tests"
+
+[[tool.mypy.overrides]]
+module = "systemd.*"
+ignore_missing_imports = true
+
+[tool.bandit]
+targets = ["myrepo"]
+exclude = ["/tests"]
