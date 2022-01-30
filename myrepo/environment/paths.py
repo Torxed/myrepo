@@ -1,7 +1,7 @@
 import pathlib
 from .storage import storage
 from ..system.workers import SysCommand
-from ..exceptions import RepositoryError
+from ..exceptions import RepositoryError, SysCallError
 
 def setup_destination(path :pathlib.Path) -> bool:
 	for repo in storage['repositories']:
@@ -11,6 +11,8 @@ def setup_destination(path :pathlib.Path) -> bool:
 
 		(path/repo[0]/"os"/storage['arguments'].architecture).mkdir(parents=True, exist_ok=True)
 
-
-		if not (repo_add := SysCommand(f"repo-add {database_path} {package_path}")).exit_code in (0, 256):
-			raise RepositoryError(f"Could not initiate repository {database_path}: [{repo_add.exit_code}] {repo_add}")
+		try:
+			SysCommand(f"repo-add {database_path} {package_path}")
+		except SysCallError as error:
+			if error.exit_code not in (0, 256):
+				raise RepositoryError(f"Could not initiate repository {database_path}: [{error.exit_code}] {error}")

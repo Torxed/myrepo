@@ -7,7 +7,7 @@ from .environment.paths import setup_destination
 from .system.workers import SysCommand, SysCommandWorker
 from .system.logger import log
 from .models import RepositoryStruct
-from .tooling.packages import sync_packages
+from .tooling.packages import sync_packages, update_repo_db
 
 __author__ = 'Anton Hvornum'
 __version__ = '0.0.1'
@@ -24,6 +24,7 @@ parser.add_argument("--core", default=True, action="store_false", help="Enables 
 parser.add_argument("--extra", default=True, action="store_false", help="Enables sync of the extra repository")
 parser.add_argument("--community", default=True, action="store_false", help="Enables sync of the community repository")
 parser.add_argument("--testing", default=False, action="store_false", help="Enables sync of the testing repository")
+parser.add_argument("--multilib", default=False, action="store_false", help="Enables sync of the multilib repository")
 parser.add_argument("--packages", default="base base-devel linux linux-firmware", nargs="?", help="Where to setup the repository structure", type=str)
 parser.add_argument("--mirror-list", default="/etc/pacman.d/mirrorlist", nargs="?", help="Where to setup the repository structure", type=pathlib.Path)
 parser.add_argument("--mirror-regions", default=None, nargs="?", help="Override /etc/pacman.d/mirrorlist and --mirror-list", type=str)

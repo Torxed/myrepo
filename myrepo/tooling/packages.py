@@ -4,10 +4,11 @@ import urllib.request
 import json
 import logging
 import glob
+from typing import List
 from ..system.logger import log
 from ..system.workers import SysCommand
 from ..models import PackageSearch, PackageSearchResult
-from ..exceptions import PackageError
+from ..exceptions import PackageError, SysCallError
 from ..environment.storage import storage
 
 BASE_URL_PKG_SEARCH = 'https://archlinux.org/packages/search/json/?name={package}'
@@ -44,6 +45,10 @@ def package_search(package :str) -> PackageSearch:
 	ssl_context.check_hostname = False
 	ssl_context.verify_mode = ssl.CERT_NONE
 	response = urllib.request.urlopen(BASE_URL_PKG_SEARCH.format(package=package), context=ssl_context)
+
+	if response.code != 200:
+		raise PackageError(f"Could not locate package: [{response.code}] {response}")
+
 	data = response.read().decode('UTF-8')
 	return PackageSearch(**json.loads(data))
 
@@ -70,8 +75,20 @@ def find_package(package :str) -> PackageSearchResult:
 
 	raise PackageError(f"Could not locate {package} in result while looking for repository category")
 
-def download_package(package :str, url :str, destination :pathlib.Path, filename :str, include_signature=True) -> bool:
+def download_package(package :str, repo :str, url :str, destination :pathlib.Path, filename :str, include_signature=True) -> bool:
+
 	if (url := urllib.parse.urlparse(url)).scheme and url.scheme in ('https', 'http'):
+		destination.mkdir(parents=True, exist_ok=True)
+
+		# If it's a repository we haven't configured yet:
+		database_path = destination/f"{repo}.db.tar.gz"
+
+		try:
+			SysCommand(f"repo-add {database_path} __init__")
+		except SysCallError as error:
+			if error.exit_code not in (0, 256):
+				raise RepositoryError(f"Could not initiate repository {database_path}: [{error.exit_code}] {error}")
+
 		with (destination/filename).open('wb') as output:
 			output.write(urllib.request.urlopen(url.geturl()).read())
 
@@ -83,22 +100,156 @@ def download_package(package :str, url :str, destination :pathlib.Path, filename
 
 	raise PackageError(f"Unknown or unsupported URL scheme when downloading package: {[url.scheme]}")
 
-def sync_packages(packages :str, path :pathlib.Path) -> None:
+class VersionDef:
+	major = None
+	minor = None
+	patch = None
+
+	def __init__(self, version_string :str):
+		self.version_raw = version_string
+		if '.' in version_string:
+			self.versions = version_string.split('.')
+		else:
+			self.versions = [version_string]
+
+		if '-' in self.versions[-1]:
+			version, patch_version = self.versions[-1].split('-', 1)
+			self.verions = self.versions[:-1] + [version]
+			self.patch = patch_version
+
+		self.major = self.versions[0]
+		if len(self.versions) >= 2:
+			self.minor = self.versions[1]
+		if len(self.versions) >= 3:
+			self.patch = self.versions[2]
+
+	def __eq__(self, other :'VersionDef') -> bool:
+		if other.major == self.major and \
+			other.minor == self.minor and \
+			other.patch == self.patch:
+
+			return True
+		return False
+		
+	def __lt__(self, other :'VersionDef') -> bool:
+		print(f"Comparing {self} against {other}")
+		if self.major > other.major:
+			return False
+		elif self.minor and other.minor and self.minor > other.minor:
+			return False
+		elif self.patch and other.patch and self.patch > other.patch:
+			return False
+
+	def __str__(self) -> str:
+		return self.version_raw
+
+def sync_packages(packages :List[str], path :pathlib.Path, skip :List[str] = []) -> List[str]:
 	# package_struct = {}
 
 	repositories_to_update = []
 	for package in packages:
-		log(f"Synchronizing package: {package}", level=logging.INFO, fg="yellow")
-		# package_struct[package] = {'category' : get_package_category(package)}
+		# Parsing of dependency version control
+		target_version = None
+		target_version_gt = False
+		target_version_lt = False
+		target_version_gt_or_eq = False
+		target_version_lt_or_eq = False
+		target_version_specific = False
+		if '>=' in package:
+			package, target_version = package.rsplit('>=', 1)
+			target_version_gt_or_eq = VersionDef(target_version)
+		elif '>' in package:
+			package, target_version = package.rsplit('>', 1)
+			target_version_gt = VersionDef(target_version)
+		elif '<=' in package:
+			package, target_version = package.rsplit('<=', 1)
+			target_version_lt_or_eq = VersionDef(target_version)
+		elif '<' in package:
+			package, target_version = package.rsplit('<', 1)
+			target_version_lt = VersionDef(target_version)
+		elif '=' in package:
+			package, target_version = package.rsplit('=', 1)
+
+			if '-' in target_version:
+				minimum, maximum = target_version.split('-', 1)
+				target_version_gt_or_eq = VersionDef(minimum)
+				target_version_lt_or_eq = VersionDef(maximum)
+			else:
+				target_version_specific = VersionDef(target_version)
+
+		if package in skip:
+			log(f"Package {package} already downloaded, skipping!", level=logging.DEBUG)
+			continue
+
+		else:
+			log(f"Synchronizing package: {package}", level=logging.INFO, fg="yellow")
+		
 		try:
 			package_info = find_package(package)
 		except IsGroup:
 			log(f"{package} is a group, not supported yet", level=logging.WARNING, fg="red")
 			continue
+		except PackageError:
+			log(f"{package} could not be located in either of upstream package database or upstream group database, resorting to 'pkgfile'")
+			found_fildep = False
 
-		version = package_info.pkgver
+			try:
+				for line in SysCommand(f"pkgfile {package}"):
+					target_repo, package_from_pkg = line.split(b'/')
+					package_from_pkg = package_from_pkg.decode().strip()
+					
+					if getattr(storage['repositories'], target_repo.decode()) is False:
+						continue
+
+					repositories_to_update = list(set(repositories_to_update + sync_packages([package_from_pkg], path, skip)))
+					
+					skip.append(package_from_pkg)
+					found_fildep = True
+					package_info = find_package(package_from_pkg)
+					
+					break
+
+				if found_fildep:
+					continue
+
+			except SysCallError:
+				# Fallback, use `pacman -Ss` in an attempt to resolve the package
+				for line in SysCommand(f"pacman --color never -Ss {package}"):
+					package_from_pacman, version_def, *_ = line.split(b' ')
+					target_repo, package_from_pacman = package_from_pacman.decode().split('/')
+
+					if getattr(storage['repositories'], target_repo) is False:
+						continue
+
+					repositories_to_update = list(set(repositories_to_update + sync_packages([package_from_pacman], path, skip)))
+					package_info = find_package(package_from_pacman)		
+
+					found_fildep = True
+					break
+
+				if found_fildep:
+					continue
+
+				raise PackageError(f"Could not locate dependency {package} using pkgfile!")
+
+		version = VersionDef(package_info.pkgver)
+		if target_version:
+			target_version = VersionDef(target_version)
+			if target_version_gt and version < target_version:
+				raise PackageError(f"Package {package} requires version newer than {target_version} but {version} was found")
+			elif target_version_gt_or_eq and version < target_version and version != target_version:
+				raise PackageError(f"Package {package} requires version newer or equal to {target_version} but {version} was found")
+			elif target_version_lt and version > target_version:
+				raise PackageError(f"Package {package} requires version older than {target_version} but {version} was found")
+			elif target_version_lt_or_eq and version > target_version and version != target_version:
+				raise PackageError(f"Package {package} requires version older or equal to {target_version} but {version} was found")
+			elif target_version_specific and version != target_version_specific:
+				raise PackageError(f"Package {package} requires version equal to {target_version} but {version} was found")
 
 		repo = package_info.repo
+		if getattr(storage['arguments'], repo) is False:
+			raise PackageError(f"Repository --{repo} is not activated, package is blocked")
+
 		database_path = path/repo/"os"/storage['arguments'].architecture
 		log(f"Found package '{package}', version {version} in repo {repo}", level=logging.DEBUG)
 
@@ -116,19 +267,27 @@ def sync_packages(packages :str, path :pathlib.Path) -> None:
 
 			log(f"Attempting download from mirror {mirror}", level=logging.DEBUG)
 			log(f"Mirror definition was converted to: {mirror_py_friendly}", level=logging.DEBUG)
-			if download_package(package, mirror_py_friendly, database_path, package_info.filename, include_signature=storage['arguments'].skip_sig is False):
+			if download_package(package, repo, mirror_py_friendly, database_path, package_info.filename, include_signature=storage['arguments'].skip_sig is False):
 				grabbed = True
 				break
 		
 		if not grabbed:
 			raise PackageError(f"Implement pacman -Syw --cachedir --dbdir ...")
 
-	for repo in repositories_to_update:		
-		log(f"Updating repo {repo} with any new packages", level=logging.INFO)
-		database_path = path/repo/"os"/storage['arguments'].architecture
-		options = ['--new', '--remove', '--prevent-downgrade']
+		skip.append(package)
+		if package_info.depends:
+			repositories_to_update = list(set(repositories_to_update + sync_packages(package_info.depends, path, skip)))
 
-		for package_type in ['.pkg.tar.xz', '.pkg.tar.zst']:
-			for package in glob.glob(f"{database_path}/*{package_type}"):
-				if not (repo_add := SysCommand(f"repo-add {' '.join(options)} {database_path}/{repo}.db.tar.gz {package}")).exit_code in (0, 256):
-					raise RepositoryError(f"Could not initiate repository {database_path}: [{repo_add.exit_code}] {repo_add}")
+	return repositories_to_update
+
+def update_repo_db(repo :str, path :pathlib.Path) -> bool:
+	log(f"Updating repo {repo} with any new packages", level=logging.INFO)
+	database_path = path/repo/"os"/storage['arguments'].architecture
+	options = ['--new', '--remove', '--prevent-downgrade']
+
+	for package_type in ['.pkg.tar.xz', '.pkg.tar.zst']:
+		for package in glob.glob(f"{database_path}/*{package_type}"):
+			if not (repo_add := SysCommand(f"repo-add {' '.join(options)} {database_path}/{repo}.db.tar.gz {package}")).exit_code in (0, 256):
+				raise RepositoryError(f"Could not initiate repository {database_path}: [{repo_add.exit_code}] {repo_add}")
+
+	return True

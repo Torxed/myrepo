@@ -41,7 +41,7 @@ else:
 from ..exceptions import SysCallError
 from ..environment.storage import storage
 from .logger import log
-from .helpers import locate_binary, pid_exists
+from .helpers import locate_binary, pid_exists, clear_vt100_escape_codes
 
 class SysCommandWorker:
 	def __init__(self,
@@ -50,7 +50,8 @@ class SysCommandWorker:
 		peak_output :Optional[bool] = False,
 		environment_vars :Optional[Dict[str, Any]] = None,
 		logfile :Optional[None] = None,
-		working_directory :Optional[str] = './'):
+		working_directory :Optional[str] = './',
+		remove_vt100_escape_codes_from_lines :bool = True):
 		"""
 		A general purpose system-command class which can execute and communicate
 		with a spawned process. It also supports communicating with sub-tty's which
@@ -89,6 +90,7 @@ class SysCommandWorker:
 		self.child_fd :Optional[int] = None
 		self.started :Optional[float] = None
 		self.ended :Optional[float] = None
+		self.remove_vt100_escape_codes_from_lines :bool = remove_vt100_escape_codes_from_lines
 
 	def __contains__(self, key: bytes) -> bool:
 		"""
@@ -111,6 +113,9 @@ class SysCommandWorker:
 		"""
 		for line in self._trace_log[self._trace_log_pos:self._trace_log.rfind(b'\n')].split(b'\n'):
 			if line:
+				if self.remove_vt100_escape_codes_from_lines:
+					line = clear_vt100_escape_codes(line)
+
 				yield line + b'\n'
 
 		self._trace_log_pos = self._trace_log.rfind(b'\n')
@@ -142,6 +147,7 @@ class SysCommandWorker:
 			try:
 				os.close(self.child_fd)
 			except: # nosec
+				print('Exception!')
 				pass
 
 		if self.peak_output:
@@ -154,7 +160,7 @@ class SysCommandWorker:
 			log(args[1], level=logging.ERROR, fg='red')
 
 		if self.exit_code != 0:
-			raise SysCallError(f"{self.cmd} exited with abnormal exit code: {self.exit_code}", self.exit_code)
+			raise SysCallError(f"{self.cmd} exited with abnormal exit code [{self.exit_code}]: {self.decode()[:100]}", self.exit_code)
 
 	def is_alive(self) -> bool:
 		"""
@@ -315,7 +321,8 @@ class SysCommand:
 		start_callback :Optional[Callable[[Any], Any]] = None,
 		peak_output :Optional[bool] = False,
 		environment_vars :Optional[Dict[str, Any]] = None,
-		working_directory :Optional[str] = './'):
+		working_directory :Optional[str] = './',
+		remove_vt100_escape_codes_from_lines :bool = True):
 		"""
 		A more convenient wrapper around :ref:`SysCommandWorker` where care
 		for the process lifecyles isn't as important.
@@ -339,6 +346,7 @@ class SysCommand:
 		self.peak_output = peak_output
 		self.environment_vars = environment_vars
 		self.working_directory = working_directory
+		self.remove_vt100_escape_codes_from_lines = remove_vt100_escape_codes_from_lines
 
 		self.session :Optional[SysCommandWorker] = None
 		self.session = self.create_session()
@@ -411,10 +419,12 @@ class SysCommand:
 		if self.session:
 			return self.session
 
-		self.session = SysCommandWorker(self.cmd, callbacks=self._callbacks, peak_output=self.peak_output, environment_vars=self.environment_vars)
+		with SysCommandWorker(self.cmd, callbacks=self._callbacks, peak_output=self.peak_output, environment_vars=self.environment_vars, remove_vt100_escape_codes_from_lines=self.remove_vt100_escape_codes_from_lines) as session:
+			if not self.session:
+				self.session = session
 
-		while self.session.ended is None:
-			self.session.poll()
+			while self.session.ended is None:
+				self.session.poll()
 
 		if self.peak_output:
 			sys.stdout.write('\n')
