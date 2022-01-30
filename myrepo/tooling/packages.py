@@ -286,7 +286,11 @@ def sync_packages(packages :List[str], path :pathlib.Path, skip :List[str] = [])
 def update_repo_db(repo :str, path :pathlib.Path) -> bool:
 	log(f"Updating repo {repo} with any new packages", level=logging.INFO)
 	database_path = path/repo/"os"/storage['arguments'].architecture
-	options = ['--new', '--remove', '--prevent-downgrade', '--sign']
+	options = ['--new', '--remove', '--prevent-downgrade']
+	if storage['arguments'].key:
+		log(f"Signing the database with key '{storage['arguments'].key}'", level=logging.INFO, fg="yellow")
+		options.append(f"--sign")
+		options.append(f"--key {storage['arguments'].key}")
 
 	for package_type in ['.pkg.tar.xz', '.pkg.tar.zst']:
 		for package in glob.glob(f"{database_path}/*{package_type}"):

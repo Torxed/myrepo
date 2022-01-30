@@ -160,7 +160,7 @@ class SysCommandWorker:
 			log(args[1], level=logging.ERROR, fg='red')
 
 		if self.exit_code != 0:
-			raise SysCallError(f"{self.cmd} exited with abnormal exit code [{self.exit_code}]: {self.decode()[:100]}", self.exit_code)
+			raise SysCallError(f"{self.cmd} exited with abnormal exit code [{self.exit_code}]: {self.decode()[:500]}", self.exit_code)
 
 	def is_alive(self) -> bool:
 		"""

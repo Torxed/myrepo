@@ -31,7 +31,7 @@ parser.add_argument("--mirror-regions", default=None, nargs="?", help="Override 
 parser.add_argument("--architecture", default="x86_64", nargs="?", help="Override the default architecture of x86_64", type=str)
 parser.add_argument("--debug", default=False, action="store_true", help="Enables extra verbosity to terminal output (DEBUG etc are always sent to journald)")
 parser.add_argument("--skip-sig", default=False, action="store_false", help="Disables signature download and checks for new packages in repository")
-
+parser.add_argument("--key", default=None, nargs="?", help="Defines which key to use as a signing key for the repository")
 
 args, unknowns = parser.parse_known_args()
 
