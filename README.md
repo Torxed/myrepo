@@ -1,5 +1,5 @@
 # myrepo
-A tool to create your own Arch Linux repository
+A *(**experimental**)* tool to create your own Arch Linux repository
 
 # Example
 
